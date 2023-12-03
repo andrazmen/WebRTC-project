@@ -1,4 +1,5 @@
 node/
+node/node_modules/
 Example/
 js/
 test/
