@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+  <head></head>
+  <body>
+    <form id="input-form-caller">
+      <label for="message">Enter Message:</label>
+      <input type="text" id="message" name="message" /><br /><br />
+      <input type="submit" value="Send" />
+    </form>
+
+    <div id="messages"></div>
+    <div id="errorMsg"></div>
+
+    <video id="localVideo" autoplay playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+    <button id="showVideo">Open camera</button>
+
+    <script>
+      const socket = new WebSocket("ws://localhost:443/");
+      /*
+      socket.onmessage = (event) => {
+        console.log(event);
+        document.getElementById("messages").innerHTML +=
+          "Message from server: " + event.data + "<br>";
+      };
+      socket.addEventListener("open", () => {
+        console.log("We are connected");
+      });
+      function sendMessage(event) {
+        var inputMessage = document.getElementById("message");
+        webSocket.send(inputMessage.value);
+        inputMessage.value = "";
+        event.preventDefault();
+      }
+      /*
+      const constraints = {
+        video: true,
+        audio: true,
+      };
+
+      async function videoHandler() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          handleSuccess(stream);
+        } catch (e) {
+          handleError(e);
+        }
+      }
+      function handleSuccess(stream) {
+        const video = document.getElementById("localVideo");
+        //const videoTracks = stream.getVideoTracks();
+        //console.log("Got stream with constraints:", constraints);
+        //console.log(`Using video device: ${videoTracks[0].label}`);
+        //window.stream = stream; // make variable available to browser console
+        localVideo.srcObject = stream;
+        //makeCall(stream);
+
+        // Get user media
+        /*
+        navigator.mediaDevices
+          .getUserMedia(constraints) // Promise
+          .then((stream) => {
+            localVideo.srcObject = stream;
+            makeCall(stream);
+          })
+          .catch((error) => {
+            console.log("Couldn't open camera.", error);
+          });
+
+      }
+      */
+      const constraints = (window.constraints = {
+        audio: false,
+        video: true,
+      });
+
+      function handleSuccess(stream) {
+        const video = document.querySelector("video");
+        const videoTracks = stream.getVideoTracks();
+        console.log("Got stream with constraints:", constraints);
+        console.log(`Using video device: ${videoTracks[0].label}`);
+        window.stream = stream; // make variable available to browser console
+        video.srcObject = stream;
+        makeCall(stream);
+      }
+
+      function handleError(error) {
+        if (error.name === "OverconstrainedError") {
+          const v = constraints.video;
+          errorMsg(
+            `The resolution ${v.width.exact}x${v.height.exact} px is not supported by your device.`
+          );
+        } else if (error.name === "NotAllowedError") {
+          errorMsg(
+            "Permissions have not been granted to use your camera and " +
+              "microphone, you need to allow the page access to your devices in " +
+              "order for the demo to work."
+          );
+        }
+        errorMsg(`getUserMedia error: ${error.name}`, error);
+      }
+
+      function errorMsg(msg, error) {
+        const errorElement = document.querySelector("#errorMsg");
+        errorElement.innerHTML += `<p>${msg}</p>`;
+        if (typeof error !== "undefined") {
+          console.error(error);
+        }
+      }
+
+      async function init(e) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          handleSuccess(stream);
+          e.target.disabled = true;
+        } catch (e) {
+          handleError(e);
+        }
+      }
+
+      async function makeCall(stream) {
+        // Create an RTCPeerConnection
+        const localPeerConnection = new RTCPeerConnection();
+
+        // Add the local stream to the connection
+        stream
+          .getTracks()
+          .forEach((localTrack) =>
+            localPeerConnection.addTrack(localTrack, stream)
+          );
+
+        console.log("Stream added to the connection");
+
+        // Listening for offers
+        /*
+        socket.onmessage = (event) => {
+          console.log(event);
+          document.getElementById("messages").innerHTML +=
+            "Message from server: " + event.data + "<br>";
+        };
+        socket.addEventListener("open", () => {
+          console.log("We are connected");
+        });
+        */
+        socket.addEventListener("message", async (message) => {
+          //console.log("Answer: ", message);
+          const data = JSON.parse(message.data);
+
+          if (data.type == 'answer') {
+            // Set this offer as remote description
+            await localPeerConnection.setRemoteDescription(
+              new RTCSessionDescription(data)
+            );
+            console.log("Remote description set");
+          }
+        });
+
+        // Create offer
+        const localOffer = await localPeerConnection.createOffer();
+
+        // Set that offer as local description
+        await localPeerConnection.setLocalDescription(localOffer);
+        console.log("Local description set");
+
+        // Send offer
+        socket.send(JSON.stringify({ type: 'offer', sdp: localOffer.sdp }));
+        console.log("Local offer send");
+      }
+
+      const peerConnection = new RTCPeerConnection();
+      console.log("RTCPeerConnection created");
+
+      /*
+      socket.onmessage = async (event) => {
+
+        const data = JSON.parse(event.data);
+        console.log(data.type);
+        //console.log(event.data.type);
+        if (data.type == 'offer') {
+          await peerConnection.setRemoteDescription(
+            new RTCSessionDescription(data)
+          );
+          console.log("Remote description set");
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          console.log("Local description set");
+          socket.send({ answer: answer });
+        }
+      };
+      */
+
+      socket.addEventListener("message", async (message) => {
+
+        try {
+          if (isJSON(message.data)) {
+            const data = JSON.parse(message.data);
+
+            if (data.type == 'offer') {
+              await peerConnection.setRemoteDescription(
+                new RTCSessionDescription(data)
+              );
+              console.log("Remote description set");
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              console.log("Local description set");
+              socket.send({ answer: answer });
+            }
+          } else {
+            console.error('Invalid JSON format:', message.data);
+            // Handle the error as needed for invalid JSON format
+          }
+        } catch (error) {
+          console.error('Error parsing JSON:', error);
+        }
+      });
+
+      // Listen for local ICE candidates on the local RTCPeerConnection
+      peerConnection.addEventListener("icecandidate", (event) => {
+        if (event.candidate) {
+          console.log(event.candidate);
+          
+          socket.send(JSON.stringify(event.candidate));
+
+          //socket.send({ "new-ice-candidate": event.candidate });
+          console.log("Ice candidates send");
+        }
+      });
+
+      // Listen for remote ICE candidates and add them to the local RTCPeerConnection
+      
+      socket.addEventListener("message", async (message) => {
+
+        try {
+          const data = JSON.parse(message.data);
+          console.log(data.candidate);
+          if (data.candidate) {
+            try {
+              await peerConnection.addIceCandidate(data);
+            } catch (e) {
+              console.error("Error adding received ice candidate", e);
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing JSON:', error);
+        }
+      });
+
+      // Listen for connectionstatechange on the local RTCPeerConnection
+      peerConnection.addEventListener("connectionstatechange", (event) => {
+        if (peerConnection.connectionState === "connected") {
+          console.log("Peers connected!");
+        }
+      });
+
+      function isJSON(str) {
+        try {
+          JSON.parse(str);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      /*
+      async function makeCall(stream) {
+        // Create an RTCPeerConnection
+        const localPeerConnection = new RTCPeerConnection();
+
+        // Add the local stream to the connection
+        stream
+          .getTracks()
+          .forEach((localTrack) =>
+            localPeerConnection.addTrack(localTrack, stream)
+          );
+
+        // Listening for offers
+        socket.addEventListener("message", (message) => {
+          console.log("Answer: ", message.data);
+
+          if (message.answer) {
+            // Set this offer as remote description
+            localPeerConnection.setRemoteDescription(
+              new RTCSessionDescription(message.answer)
+            );
+          }
+        });
+
+        // Create offer
+        const localOffer = await localPeerConnection.createOffer();
+
+        // Set that offer as local description
+        await localPeerConnection.setLocalDescription(localOffer);
+
+        // Send offer
+        socket.send(localOffer);
+      }
+      */
+      //document
+      //.getElementById("input-form-caller")
+      //.addEventListener("submit", sendMessage);
+
+      document
+        .querySelector("#showVideo")
+        .addEventListener("click", (e) => init(e));
+    </script>
+  </body>
+</html>
