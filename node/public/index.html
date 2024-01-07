@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebRTC App</title>
+    <h1>WebRTC</h1>
+  </head>
+  <body>
+    <div>
+      <div id="messages"></div>
+      <div id="errorMsg"></div>
+    </div>
+    <div>
+      <div id="id">
+        <p>My user ID: <span id="userID"></span></p>
+      </div>
+
+      <button id="showVideo">Open camera</button>
+
+      <form
+        id="form"
+        onsubmit="makeCall(stream, peerConnection); return false;"
+      >
+        <br />
+        <label for="userID">Receiver user ID:</label>
+        <input type="text" name="receiverID" required />
+
+        <input type="submit" value="Make Call" />
+      </form>
+      <button id="endCall" style="display: none">End call</button>
+    </div>
+
+    <div>
+      <br />
+      <video id="localVideo" autoplay playsinline></video>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

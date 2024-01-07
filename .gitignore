@@ -2,4 +2,7 @@ node_modules/
 Example/
 js/
 test/
-websocket-backup.html
+info.txt
+Backup/
+node/public/newapp.js
+node/old
