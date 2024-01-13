@@ -1,25 +1,25 @@
 //const socket = new WebSocket("ws://localhost:8080/");
-const socket = new WebSocket("ws://192.168.1.235:8080/"); //192.168.89.138
+const socket = new WebSocket("ws://192.168.204.138:8080/"); //192.168.1.235
 //const socket = new WebSocket("ws://92.37.13.194:8080/");
 
-socket.addEventListener("open", () => {
-  console.log("I am connected!");
-});
+const localVideo = document.querySelector("#localVideo");
+const remoteVideo = document.querySelector("#remoteVideo");
+localVideo.style.display = "none";
+remoteVideo.style.display = "none";
 
-socket.addEventListener("message", (message) => {
-  const data = JSON.parse(message.data);
-  if (data.type === "id") {
-    var myID = data.id;
-    console.log("This is my ID:", myID);
+const form = document.querySelector("#form");
+const cameraButton = document.querySelector("#showVideo");
+const endCallButton = document.querySelector("#endCall");
+endCallButton.disabled = true;
+cameraButton.disabled = false;
+form.style.display = "block";
 
-    const displayID = document.querySelector("#userID");
-    displayID.textContent = myID.toString();
-  }
-});
+const userID = document.querySelector("#userID");
+let receiverID;
 
-// Create an RTCPeerConnection
-var peerConnection = new RTCPeerConnection();
-console.log("RTCPeerConnection created");
+const errorElement = document.querySelector("#errorMsg");
+
+let peerConnection;
 
 const constraints = (window.constraints = {
   audio: false,
@@ -41,19 +41,89 @@ const iceConfiguration = {
   ],
 };
 */
+
+cameraButton.addEventListener("click", () => {
+  var stream = openCamera();
+});
+
+endCallButton.addEventListener("click", () => {
+  closeCall();
+});
+
+socket.addEventListener("open", () => {
+  console.log("I am connected!");
+});
+
+socket.addEventListener("message", (message) => {
+  const data = JSON.parse(message.data);
+  if (data.type === "id") {
+    const myID = data.id;
+    console.log("This is my ID:", myID);
+
+    userID.textContent = myID.toString();
+  } else if (data.type === "callResponse") {
+    if (localVideo.srcObject !== null && localVideo.srcObject.active === true) {
+      makeCall(stream);
+    } else {
+      errorMsg("First you need to open your camera!");
+      console.log("First you need to open your camera!");
+    }
+  } else if (data.type === "callRequest") {
+    receiverID = data.userID;
+    if (confirm(`Call from: ${data.userID}`)) {
+      if (
+        localVideo.srcObject !== null &&
+        localVideo.srcObject.active === true
+      ) {
+        takeTheCall();
+        socket.send(
+          JSON.stringify({
+            toUserID: receiverID,
+            type: "callResponse",
+          })
+        );
+      } else {
+        errorMsg("First you need to open your camera!");
+        console.log("First you need to open your camera!");
+
+        socket.send(
+          JSON.stringify({
+            toUserID: receiverID,
+            type: "callRejected",
+          })
+        );
+      }
+    } else {
+      console.log("Call request rejected!");
+      errorMsg("Call request rejected!");
+
+      socket.send(
+        JSON.stringify({
+          toUserID: receiverID,
+          type: "callRejected",
+        })
+      );
+    }
+  } else if (data.type === "callRejected") {
+    console.log("Call was rejected by callee!");
+    errorMsg("Call was rejected by callee!");
+  }
+});
+
 async function openCamera() {
   try {
     // Make sure localVideo element is active
-    const localVideoElement = document.querySelector("#localVideo");
-    localVideoElement.style.display = "block";
+    localVideo.style.display = "block";
 
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const video = document.querySelector("#localVideo");
     const videoTracks = stream.getVideoTracks();
     console.log("Got stream with constraints:", constraints);
     console.log(`Using video device: ${videoTracks[0].label}`);
     window.stream = stream; // make variable available to browser console
-    video.srcObject = stream;
+    localVideo.srcObject = stream;
+
+    cameraButton.disabled = true;
+
     return stream;
   } catch (error) {
     console.log("Error in opening camera!");
@@ -63,33 +133,30 @@ async function openCamera() {
 
 async function closeCall() {
   try {
-    const localTracks = document
-      .querySelector("#localVideo")
-      .srcObject.getTracks();
+    const localTracks = localVideo.srcObject.getTracks();
     localTracks.forEach((track) => {
       track.stop();
     });
-    const remoteTracks = document
-      .querySelector("#remoteVideo")
-      .srcObject.getTracks();
+    const remoteTracks = remoteVideo.srcObject.getTracks();
     remoteTracks.forEach((track) => {
       track.stop();
     });
 
     if (peerConnection) {
       peerConnection.close();
+      peerConnection = null;
       console.log("Peer connection closed!");
     }
-    // Close localVideo element
-    const localVideoElement = document.querySelector("#localVideo");
-    localVideoElement.style.display = "none";
+    // Close video elements
+    localVideo.style.display = "none";
+    remoteVideo.style.display = "none";
 
-    const endCallButton = document.querySelector("#endCall");
-    endCallButton.style.display = "none";
-    const remoteVideoElement = document.querySelector("#remoteVideo");
-    remoteVideoElement.style.display = "none";
+    cameraButton.disabled = false;
+    endCallButton.disabled = true;
+
+    form.style.display = "block";
   } catch (e) {
-    console.log("Error in opening camera!");
+    console.log("Cannot end the call!");
     handleError(e);
   }
 }
@@ -104,79 +171,202 @@ function handleError(error) {
 }
 
 function errorMsg(msg, error) {
-  const errorElement = document.querySelector("#errorMsg");
-  errorElement.innerHTML += `<p>${msg}</p>`;
+  errorElement.innerHTML = `<p>${msg}</p>`;
   if (typeof error !== "undefined") {
     console.error(error);
   }
 }
 
-async function makeCall(stream, localPeerConnection) {
-  const receiverForm = document.querySelector("#form");
-  const receiverID = receiverForm.querySelector("[name=receiverID]").value;
+async function sendCallRequest() {
+  try {
+    if (localVideo.srcObject !== null && localVideo.srcObject.active === true) {
+      const receiverForm = document.querySelector("#form");
+      receiverID = receiverForm.querySelector("[name=receiverID]").value;
 
+      socket.send(
+        JSON.stringify({
+          userID: userID.textContent,
+          toUserID: receiverID,
+          type: "callRequest",
+        })
+      );
+    } else {
+      errorMsg("First you need to open your camera!");
+      console.log("First you need to open your camera!");
+    }
+  } catch (e) {
+    errorMsg("Can not send call request!");
+    console.log("Can not send call request!");
+  }
+}
+
+async function makeCall(stream) {
+  // Create an RTCPeerConnection
+  peerConnection = new RTCPeerConnection();
+  console.log("RTCPeerConnection created");
+
+  try {
+    // Make sure remoteVideo element is active
+    remoteVideo.style.display = "block";
+
+    // Add the local stream to the connection
+    stream
+      .getTracks()
+      .forEach((localTrack) => peerConnection.addTrack(localTrack, stream));
+    console.log("Stream on client 1 side added to the connection: ", stream);
+
+    // Create offer
+    const localOffer = await peerConnection.createOffer();
+
+    // Set that offer as local description
+    await peerConnection.setLocalDescription(localOffer);
+    console.log("Local description set");
+
+    // Send offer
+    socket.send(
+      JSON.stringify({
+        toUserID: receiverID,
+        type: "offer",
+        sdp: localOffer.sdp,
+      })
+    );
+    console.log(
+      "This is localOffer: ",
+      JSON.stringify({ type: "offer", sdp: localOffer.sdp })
+    );
+    console.log("Local offer send");
+
+    // Listening for offers
+    socket.addEventListener("message", async (message) => {
+      const data = JSON.parse(message.data);
+      console.log("Answer data: ", data);
+
+      if (!peerConnection.currentRemoteDescription && data.type === "answer") {
+        // Set this offer as remote description
+        await peerConnection.setRemoteDescription(
+          new RTCSessionDescription(data)
+        );
+        console.log("Remote description set");
+      }
+    });
+
+    // Listen for local ICE candidates on the local RTCPeerConnection
+    peerConnection.addEventListener("icecandidate", (event) => {
+      if (event.candidate) {
+        console.log(event.candidate);
+
+        socket.send(
+          JSON.stringify({
+            toUserID: receiverID,
+            candidate: event.candidate,
+          })
+        );
+        console.log("Ice candidates send");
+      }
+    });
+
+    socket.addEventListener("message", async (message) => {
+      try {
+        const data = JSON.parse(message.data);
+        if (data.candidate) {
+          try {
+            console.log("I received candidates");
+            await peerConnection.addIceCandidate(data.candidate);
+          } catch (e) {
+            console.error("Error adding received ice candidate", e);
+          }
+        }
+      } catch (error) {
+        console.error("Error parsing JSON:", error);
+        handleError(error);
+      }
+    });
+    // Adding remote video
+
+    peerConnection.addEventListener("track", async (event) => {
+      const [remoteStream] = event.streams;
+      remoteVideo.srcObject = remoteStream;
+      console.log("Remote video added: ", remoteStream);
+    });
+
+    // Listen for connectionstatechange
+    peerConnection.addEventListener("connectionstatechange", (event) => {
+      if (peerConnection.connectionState === "connected") {
+        console.log("Peers connected!");
+
+        form.style.display = "none";
+        endCallButton.disabled = false;
+        errorElement.innerHTML = `<p></p>`;
+      }
+    });
+
+    // Disconnection check
+    peerConnection.addEventListener("connectionstatechange", (event) => {
+      if (peerConnection.connectionState === "disconnected") {
+        closeCall();
+      }
+    });
+  } catch (e) {
+    console.log("Error in making call!");
+    handleError(e);
+  }
+}
+
+async function takeTheCall() {
   // Make sure remoteVideo element is active
-  const remoteVideoElement = document.querySelector("#remoteVideo");
-  remoteVideoElement.style.display = "block";
+  remoteVideo.style.display = "block";
 
-  // Add the local stream to the connection
+  // Create an RTCPeerConnection
+  peerConnection = new RTCPeerConnection();
+  console.log("RTCPeerConnection created");
+
+  // Add the stream to the connection
   stream
     .getTracks()
-    .forEach((localTrack) => localPeerConnection.addTrack(localTrack, stream));
-  console.log("Stream on client 1 side added to the connection: ", stream);
-
-  // Create offer
-  const localOffer = await localPeerConnection.createOffer();
-
-  // Set that offer as local description
-  await localPeerConnection.setLocalDescription(localOffer);
-  console.log("Local description set");
-
-  // Send offer
-  socket.send(
-    JSON.stringify({
-      callerID: document.querySelector("#userID").textContent,
-      receiverID: receiverID,
-      type: "offer",
-      sdp: localOffer.sdp,
-    })
-  );
-  console.log(
-    "This is localOffer: ",
-    JSON.stringify({ type: "offer", sdp: localOffer.sdp })
-  );
-  console.log("Local offer send");
+    .forEach((localTrack) => peerConnection.addTrack(localTrack, stream));
+  console.log("Stream on client 2 side added to the connection: ", stream);
 
   // Listening for offers
   socket.addEventListener("message", async (message) => {
     const data = JSON.parse(message.data);
-    console.log("Answer data: ", data);
 
-    if (
-      data.callerID === document.querySelector("#userID").textContent &&
-      !localPeerConnection.currentRemoteDescription &&
-      data.type === "answer"
-    ) {
-      // Set this offer as remote description
-      await localPeerConnection.setRemoteDescription(
+    if (data.type === "offer") {
+      // Set remote descripton
+      await peerConnection.setRemoteDescription(
         new RTCSessionDescription(data)
       );
       console.log("Remote description set");
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      console.log("Local description set");
+      console.log(
+        "This is answer:",
+        JSON.stringify({
+          type: "answer",
+          sdp: answer.sdp,
+        })
+      );
+      socket.send(
+        JSON.stringify({
+          toUserID: receiverID,
+          type: "answer",
+          sdp: answer.sdp,
+        })
+      );
     }
   });
 
-  // Listen for local ICE candidates on the local RTCPeerConnection
-  localPeerConnection.addEventListener("icecandidate", (event) => {
+  // Listening for ice candidates
+  peerConnection.addEventListener("icecandidate", (event) => {
     if (event.candidate) {
       console.log(event.candidate);
 
       socket.send(
         JSON.stringify({
-          callerID: document.querySelector("#userID").textContent,
-          receiverID: receiverID,
+          toUserID: receiverID,
+          candidate: event.candidate,
         })
       );
-      //socket.send(JSON.stringify(event.candidate));
       console.log("Ice candidates send");
     }
   });
@@ -184,13 +374,9 @@ async function makeCall(stream, localPeerConnection) {
   socket.addEventListener("message", async (message) => {
     try {
       const data = JSON.parse(message.data);
-      //console.log(data);
-      if (
-        data.callerID === document.querySelector("#userID").textContent &&
-        data.candidate
-      ) {
+      if (data.candidate) {
         try {
-          await localPeerConnection.addIceCandidate(data.candidate);
+          await peerConnection.addIceCandidate(data.candidate);
         } catch (e) {
           console.error("Error adding received ice candidate", e);
         }
@@ -200,142 +386,29 @@ async function makeCall(stream, localPeerConnection) {
       handleError(error);
     }
   });
-}
 
-// RECEIVER //
+  // Adding remote video
+  peerConnection.addEventListener("track", async (event) => {
+    const [remoteStream] = event.streams;
+    remoteVideo.srcObject = remoteStream;
+    console.log("Remote video added: ", remoteStream);
+  });
 
-// Listening for offers
-socket.addEventListener("message", async (message) => {
-  const data = JSON.parse(message.data);
-  //console.log("This is a message: ", data);
+  // Listen for connectionstatechange
+  peerConnection.addEventListener("connectionstatechange", (event) => {
+    if (peerConnection.connectionState === "connected") {
+      console.log("Peers connected!");
 
-  if (
-    data.receiverID === document.querySelector("#userID").textContent &&
-    data.type === "offer"
-  ) {
-    // Add the stream to the connection
-    stream
-      .getTracks()
-      .forEach((localTrack) => peerConnection.addTrack(localTrack, stream));
-    console.log("Stream on client 2 side added to the connection: ", stream);
-
-    const callerID = data.callerID;
-
-    // Set remote descripton
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
-    console.log("Remote description set");
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    console.log("Local description set");
-    console.log(
-      "This is answer:",
-      JSON.stringify({
-        callerID: callerID,
-        receiverID: document.querySelector("#userID").textContent,
-        type: "answer",
-        sdp: answer.sdp,
-      })
-    );
-    socket.send(
-      JSON.stringify({
-        callerID: callerID,
-        receiverID: document.querySelector("#userID").textContent,
-        type: "answer",
-        sdp: answer.sdp,
-      })
-    );
-
-    // Listening for ice candidates
-    peerConnection.addEventListener("icecandidate", (event) => {
-      if (event.candidate) {
-        console.log(event.candidate);
-
-        socket.send(
-          JSON.stringify({
-            callerID: callerID,
-            receiverID: document.querySelector("#userID").textContent,
-            candidate: event.candidate,
-          })
-        );
-        //socket.send(JSON.stringify(event.candidate));
-        console.log("Ice candidates send");
-      }
-    });
-  }
-});
-
-socket.addEventListener("message", async (message) => {
-  try {
-    const data = JSON.parse(message.data);
-    //console.log(data);
-    if (
-      data.receiverID === document.querySelector("#userID").textContent &&
-      data.candidate
-    ) {
-      try {
-        await peerConnection.addIceCandidate(data.candidate);
-      } catch (e) {
-        console.error("Error adding received ice candidate", e);
-      }
+      form.style.display = "none";
+      endCallButton.disabled = false;
+      errorElement.innerHTML = `<p></p>`;
     }
-  } catch (error) {
-    console.error("Error parsing JSON:", error);
-    handleError(error);
-  }
-});
-// RECEIVER //
+  });
 
-// Adding remote video
-const remoteVideo = document.querySelector("#remoteVideo");
-
-peerConnection.addEventListener("track", async (event) => {
-  const [remoteStream] = event.streams;
-  remoteVideo.srcObject = remoteStream;
-  console.log("Remote video added: ", remoteStream);
-});
-
-// Listen for connectionstatechange
-peerConnection.addEventListener("connectionstatechange", (event) => {
-  if (peerConnection.connectionState === "connected") {
-    console.log("Peers connected!");
-
-    const endButton = document.querySelector("#endCall");
-    endButton.style.display = "block";
-  }
-});
-
-// Disconnection check
-peerConnection.addEventListener("connectionstatechange", (event) => {
-  if (peerConnection.connectionState === "disconnected") {
-    console.log("Peer connection closed!");
-    peerConnection.close();
-
-    const localTracks = document
-      .querySelector("#localVideo")
-      .srcObject.getTracks();
-    localTracks.forEach((track) => {
-      track.stop();
-    });
-
-    const endCallButton = document.querySelector("#endCall");
-    endCallButton.style.display = "none";
-    // Close localVideo and remoteVideo element
-    const localVideoElement = document.querySelector("#localVideo");
-    localVideoElement.style.display = "none";
-    const remoteVideoElement = document.querySelector("#remoteVideo");
-    remoteVideoElement.style.display = "none";
-  }
-});
-/*
-            async function restoreRTC() {
-              let peerConnection = new RTCPeerConnection();
-              console.log("RTCPeerConnection created. Ready for new one.");
-            }
-      */
-document.querySelector("#showVideo").addEventListener("click", () => {
-  var stream = openCamera();
-});
-
-document.querySelector("#endCall").addEventListener("click", () => {
-  closeCall();
-});
+  // Disconnection check
+  peerConnection.addEventListener("connectionstatechange", (event) => {
+    if (peerConnection.connectionState === "disconnected") {
+      closeCall();
+    }
+  });
+}

@@ -15,19 +15,16 @@
         <p>My user ID: <span id="userID"></span></p>
       </div>
 
-      <button id="showVideo">Open camera</button>
+      <button id="showVideo">Open Camera</button>
 
-      <form
-        id="form"
-        onsubmit="makeCall(stream, peerConnection); return false;"
-      >
+      <form id="form" onsubmit="sendCallRequest(); return false;">
         <br />
         <label for="userID">Receiver user ID:</label>
         <input type="text" name="receiverID" required />
 
         <input type="submit" value="Make Call" />
       </form>
-      <button id="endCall" style="display: none">End call</button>
+      <button id="endCall">End Call</button>
     </div>
 
     <div>
