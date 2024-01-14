@@ -20,9 +20,10 @@ let receiverID;
 const errorElement = document.querySelector("#errorMsg");
 
 let peerConnection;
+let stream;
 
 const constraints = (window.constraints = {
-  audio: false,
+  audio: { echoCancellation: true },
   video: {
     width: 640,
     height: 480,
@@ -43,7 +44,7 @@ const iceConfiguration = {
 */
 
 cameraButton.addEventListener("click", () => {
-  var stream = openCamera();
+  openCamera();
 });
 
 endCallButton.addEventListener("click", () => {
@@ -63,32 +64,44 @@ socket.addEventListener("message", (message) => {
     userID.textContent = myID.toString();
   } else if (data.type === "callResponse") {
     if (localVideo.srcObject !== null && localVideo.srcObject.active === true) {
-      makeCall(stream);
+      makeCall();
     } else {
       errorMsg("First you need to open your camera!");
       console.log("First you need to open your camera!");
     }
   } else if (data.type === "callRequest") {
-    receiverID = data.userID;
     if (confirm(`Call from: ${data.userID}`)) {
-      if (
-        localVideo.srcObject !== null &&
-        localVideo.srcObject.active === true
-      ) {
-        takeTheCall();
-        socket.send(
-          JSON.stringify({
-            toUserID: receiverID,
-            type: "callResponse",
-          })
-        );
+      if (!peerConnection) {
+        if (
+          localVideo.srcObject !== null &&
+          localVideo.srcObject.active === true
+        ) {
+          receiverID = data.userID;
+          takeTheCall();
+          socket.send(
+            JSON.stringify({
+              toUserID: receiverID,
+              type: "callResponse",
+            })
+          );
+        } else {
+          errorMsg("First you need to open your camera!");
+          console.log("First you need to open your camera!");
+
+          socket.send(
+            JSON.stringify({
+              toUserID: data.userID,
+              type: "callRejected",
+            })
+          );
+        }
       } else {
-        errorMsg("First you need to open your camera!");
-        console.log("First you need to open your camera!");
+        console.log("First you need to end current call!");
+        errorMsg("First you need to end current call!");
 
         socket.send(
           JSON.stringify({
-            toUserID: receiverID,
+            toUserID: data.userID,
             type: "callRejected",
           })
         );
@@ -99,7 +112,7 @@ socket.addEventListener("message", (message) => {
 
       socket.send(
         JSON.stringify({
-          toUserID: receiverID,
+          toUserID: data.userID,
           type: "callRejected",
         })
       );
@@ -115,7 +128,7 @@ async function openCamera() {
     // Make sure localVideo element is active
     localVideo.style.display = "block";
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
     const videoTracks = stream.getVideoTracks();
     console.log("Got stream with constraints:", constraints);
     console.log(`Using video device: ${videoTracks[0].label}`);
@@ -123,8 +136,6 @@ async function openCamera() {
     localVideo.srcObject = stream;
 
     cameraButton.disabled = true;
-
-    return stream;
   } catch (error) {
     console.log("Error in opening camera!");
     handleError(error);
@@ -155,9 +166,8 @@ async function closeCall() {
     endCallButton.disabled = true;
 
     form.style.display = "block";
-  } catch (e) {
-    console.log("Cannot end the call!");
-    handleError(e);
+  } catch (error) {
+    console.error("Cannot end the call:", error);
   }
 }
 
@@ -194,13 +204,13 @@ async function sendCallRequest() {
       errorMsg("First you need to open your camera!");
       console.log("First you need to open your camera!");
     }
-  } catch (e) {
+  } catch (error) {
     errorMsg("Can not send call request!");
     console.log("Can not send call request!");
   }
 }
 
-async function makeCall(stream) {
+async function makeCall() {
   // Create an RTCPeerConnection
   peerConnection = new RTCPeerConnection();
   console.log("RTCPeerConnection created");
@@ -236,17 +246,29 @@ async function makeCall(stream) {
     );
     console.log("Local offer send");
 
-    // Listening for offers
+    // Listening for answer
     socket.addEventListener("message", async (message) => {
-      const data = JSON.parse(message.data);
-      console.log("Answer data: ", data);
+      try {
+        const data = JSON.parse(message.data);
+        console.log("Answer data: ", data);
 
-      if (!peerConnection.currentRemoteDescription && data.type === "answer") {
-        // Set this offer as remote description
-        await peerConnection.setRemoteDescription(
-          new RTCSessionDescription(data)
-        );
-        console.log("Remote description set");
+        if (
+          (!peerConnection.currentRemoteDescription ||
+            peerConnection.currentRemoteDescription === null) &&
+          data.type === "answer"
+        ) {
+          try {
+            // Set this answer as remote description
+            await peerConnection.setRemoteDescription(
+              new RTCSessionDescription(data)
+            );
+            console.log("Remote description set");
+          } catch (error) {
+            console.error("Error adding remote descriprtion:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Error parsing JSON:", error);
       }
     });
 
@@ -278,15 +300,18 @@ async function makeCall(stream) {
         }
       } catch (error) {
         console.error("Error parsing JSON:", error);
-        handleError(error);
       }
     });
     // Adding remote video
 
     peerConnection.addEventListener("track", async (event) => {
-      const [remoteStream] = event.streams;
-      remoteVideo.srcObject = remoteStream;
-      console.log("Remote video added: ", remoteStream);
+      try {
+        const [remoteStream] = event.streams;
+        remoteVideo.srcObject = remoteStream;
+        console.log("Remote video added: ", remoteStream);
+      } catch (error) {
+        console.error("Error adding remote video:", error);
+      }
     });
 
     // Listen for connectionstatechange
@@ -306,9 +331,8 @@ async function makeCall(stream) {
         closeCall();
       }
     });
-  } catch (e) {
-    console.log("Error in making call!");
-    handleError(e);
+  } catch (error) {
+    console.error("Error in making call:", error);
   }
 }
 
@@ -328,31 +352,48 @@ async function takeTheCall() {
 
   // Listening for offers
   socket.addEventListener("message", async (message) => {
-    const data = JSON.parse(message.data);
+    try {
+      const data = JSON.parse(message.data);
 
-    if (data.type === "offer") {
-      // Set remote descripton
-      await peerConnection.setRemoteDescription(
-        new RTCSessionDescription(data)
-      );
-      console.log("Remote description set");
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      console.log("Local description set");
-      console.log(
-        "This is answer:",
-        JSON.stringify({
-          type: "answer",
-          sdp: answer.sdp,
-        })
-      );
-      socket.send(
-        JSON.stringify({
-          toUserID: receiverID,
-          type: "answer",
-          sdp: answer.sdp,
-        })
-      );
+      if (
+        (!peerConnection.currentRemoteDescription ||
+          peerConnection.currentRemoteDescription === null) &&
+        data.type === "offer"
+      ) {
+        try {
+          // Set remote descripton
+          await peerConnection.setRemoteDescription(
+            new RTCSessionDescription(data)
+          );
+          console.log("Remote description set");
+          try {
+            // Create answer and set local description
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            console.log("Local description set");
+            console.log(
+              "This is answer:",
+              JSON.stringify({
+                type: "answer",
+                sdp: answer.sdp,
+              })
+            );
+            socket.send(
+              JSON.stringify({
+                toUserID: receiverID,
+                type: "answer",
+                sdp: answer.sdp,
+              })
+            );
+          } catch (error) {
+            console.error("Error setting local description:", error);
+          }
+        } catch (error) {
+          console.error("Error setting remote description:", error);
+        }
+      }
+    } catch (error) {
+      console.error("Error parsing JSON:", error);
     }
   });
 
@@ -377,21 +418,24 @@ async function takeTheCall() {
       if (data.candidate) {
         try {
           await peerConnection.addIceCandidate(data.candidate);
-        } catch (e) {
-          console.error("Error adding received ice candidate", e);
+        } catch (error) {
+          console.error("Error adding received ice candidate:", error);
         }
       }
     } catch (error) {
       console.error("Error parsing JSON:", error);
-      handleError(error);
     }
   });
 
   // Adding remote video
   peerConnection.addEventListener("track", async (event) => {
-    const [remoteStream] = event.streams;
-    remoteVideo.srcObject = remoteStream;
-    console.log("Remote video added: ", remoteStream);
+    try {
+      const [remoteStream] = event.streams;
+      remoteVideo.srcObject = remoteStream;
+      console.log("Remote video added: ", remoteStream);
+    } catch (error) {
+      console.error("Error adding remote video:", error);
+    }
   });
 
   // Listen for connectionstatechange
