@@ -1,6 +1,5 @@
 //const socket = new WebSocket("ws://localhost:8080/");
 const socket = new WebSocket("ws://192.168.204.138:8080/"); //192.168.1.235
-//const socket = new WebSocket("ws://92.37.13.194:8080/");
 
 const localVideo = document.querySelector("#localVideo");
 const remoteVideo = document.querySelector("#remoteVideo");
