@@ -8,10 +8,10 @@ const webserver = express();
 
 webserver.use(express.static(path.join(__dirname, "public")));
 
-webserver.listen(3000, "192.168.204.138", () =>
-  console.log(`Listening on ${3000}`)
-);
-//webserver.listen(3000, () => console.log(`Listening on ${3000}`));
+//webserver.listen(3000, "192.168.204.138", () =>
+//  console.log(`Listening on ${3000}`)
+//);
+webserver.listen(3000, () => console.log(`Listening on ${3000}`));
 
 const sockserver = new WebSocketServer({ port: 8080 });
 clients = {};

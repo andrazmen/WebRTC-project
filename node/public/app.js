@@ -1,5 +1,5 @@
-//const socket = new WebSocket("ws://localhost:8080/");
-const socket = new WebSocket("ws://192.168.204.138:8080/"); //192.168.1.235
+const socket = new WebSocket("ws://localhost:8080/");
+//const socket = new WebSocket("ws://192.168.204.138:8080/"); //192.168.1.235
 
 const localVideo = document.querySelector("#localVideo");
 const remoteVideo = document.querySelector("#remoteVideo");
@@ -32,11 +32,7 @@ const constraints = (window.constraints = {
 const iceConfiguration = {
   iceServers: [
     {
-      urls: "turn:4.212.242.245:3478",
-      username: "admin",
-      credential: "password",
-
-      //urls: "stun:stun.l.google.com:19302",
+      urls: "stun:stun.l.google.com:19302",
     },
   ],
 };
@@ -224,38 +220,43 @@ async function makeCall() {
       .forEach((localTrack) => peerConnection.addTrack(localTrack, stream));
     console.log("Stream on client 1 side added to the connection: ", stream);
 
-    // Create offer
-    const localOffer = await peerConnection.createOffer();
+    peerConnection.addEventListener("negotiationneeded", async () => {
+      try {
+        // Create offer
+        const localOffer = await peerConnection.createOffer();
 
-    // Set that offer as local description
-    await peerConnection.setLocalDescription(localOffer);
-    console.log("Local description set");
+        // Set that offer as local description
+        await peerConnection.setLocalDescription(localOffer);
+        console.log("Local description set");
 
-    // Send offer
-    socket.send(
-      JSON.stringify({
-        toUserID: receiverID,
-        type: "offer",
-        sdp: localOffer.sdp,
-      })
-    );
-    console.log(
-      "This is localOffer: ",
-      JSON.stringify({ type: "offer", sdp: localOffer.sdp })
-    );
-    console.log("Local offer send");
+        // Send offer
+        socket.send(
+          JSON.stringify({
+            toUserID: receiverID,
+            type: "offer",
+            sdp: localOffer.sdp,
+          })
+        );
+        console.log(
+          "This is localOffer: ",
+          JSON.stringify({ type: "offer", sdp: localOffer.sdp })
+        );
+        console.log("Local offer send");
+      } catch (error) {
+        console.error("Error in start of negotiation:", error);
+      }
+    });
 
-    // Listening for answer
     socket.addEventListener("message", async (message) => {
       try {
         const data = JSON.parse(message.data);
-        console.log("Answer data: ", data);
-
+        // Listening for answer
         if (
           (!peerConnection.currentRemoteDescription ||
             peerConnection.currentRemoteDescription === null) &&
           data.type === "answer"
         ) {
+          console.log("This is answer: ", data);
           try {
             // Set this answer as remote description
             await peerConnection.setRemoteDescription(
@@ -264,6 +265,14 @@ async function makeCall() {
             console.log("Remote description set");
           } catch (error) {
             console.error("Error adding remote descriprtion:", error);
+          }
+          // Listening for candidates
+        } else if (data.candidate) {
+          console.log("I received candidate:", data);
+          try {
+            await peerConnection.addIceCandidate(data.candidate);
+          } catch (e) {
+            console.error("Error adding received ice candidate", e);
           }
         }
       } catch (error) {
@@ -286,23 +295,7 @@ async function makeCall() {
       }
     });
 
-    socket.addEventListener("message", async (message) => {
-      try {
-        const data = JSON.parse(message.data);
-        if (data.candidate) {
-          try {
-            console.log("I received candidates");
-            await peerConnection.addIceCandidate(data.candidate);
-          } catch (e) {
-            console.error("Error adding received ice candidate", e);
-          }
-        }
-      } catch (error) {
-        console.error("Error parsing JSON:", error);
-      }
-    });
     // Adding remote video
-
     peerConnection.addEventListener("track", async (event) => {
       try {
         const [remoteStream] = event.streams;
@@ -314,7 +307,8 @@ async function makeCall() {
     });
 
     // Listen for connectionstatechange
-    peerConnection.addEventListener("connectionstatechange", (event) => {
+    peerConnection.addEventListener("connectionstatechange", () => {
+      // Connection check
       if (peerConnection.connectionState === "connected") {
         console.log("Peers connected!");
 
@@ -322,11 +316,20 @@ async function makeCall() {
         endCallButton.disabled = false;
         errorElement.innerHTML = `<p></p>`;
       }
+      // Disconnection check
+      if (peerConnection.connectionState === "disconnected") {
+        closeCall();
+      }
     });
 
-    // Disconnection check
-    peerConnection.addEventListener("connectionstatechange", (event) => {
-      if (peerConnection.connectionState === "disconnected") {
+    // Listen for iceconnectionstatechange
+    peerConnection.addEventListener("iceconnectionstatechange", () => {
+      // ICE fail check
+      if (peerConnection.iceConnectionState === "failed") {
+        peerConnection.restartIce();
+      }
+      // ICE agent closed check
+      if (peerConnection.iceConnectionState === "closed") {
         closeCall();
       }
     });
@@ -359,6 +362,7 @@ async function takeTheCall() {
           peerConnection.currentRemoteDescription === null) &&
         data.type === "offer"
       ) {
+        console.log("This is offer:", data);
         try {
           // Set remote descripton
           await peerConnection.setRemoteDescription(
@@ -390,6 +394,13 @@ async function takeTheCall() {
         } catch (error) {
           console.error("Error setting remote description:", error);
         }
+      } else if (data.candidate) {
+        console.log("I received candidate:", data);
+        try {
+          await peerConnection.addIceCandidate(data.candidate);
+        } catch (error) {
+          console.error("Error adding received ice candidate:", error);
+        }
       }
     } catch (error) {
       console.error("Error parsing JSON:", error);
@@ -411,21 +422,6 @@ async function takeTheCall() {
     }
   });
 
-  socket.addEventListener("message", async (message) => {
-    try {
-      const data = JSON.parse(message.data);
-      if (data.candidate) {
-        try {
-          await peerConnection.addIceCandidate(data.candidate);
-        } catch (error) {
-          console.error("Error adding received ice candidate:", error);
-        }
-      }
-    } catch (error) {
-      console.error("Error parsing JSON:", error);
-    }
-  });
-
   // Adding remote video
   peerConnection.addEventListener("track", async (event) => {
     try {
@@ -438,7 +434,8 @@ async function takeTheCall() {
   });
 
   // Listen for connectionstatechange
-  peerConnection.addEventListener("connectionstatechange", (event) => {
+  peerConnection.addEventListener("connectionstatechange", () => {
+    // Connection check
     if (peerConnection.connectionState === "connected") {
       console.log("Peers connected!");
 
@@ -446,11 +443,20 @@ async function takeTheCall() {
       endCallButton.disabled = false;
       errorElement.innerHTML = `<p></p>`;
     }
+    // Disconnection check
+    if (peerConnection.connectionState === "disconnected") {
+      closeCall();
+    }
   });
 
-  // Disconnection check
-  peerConnection.addEventListener("connectionstatechange", (event) => {
-    if (peerConnection.connectionState === "disconnected") {
+  // Listen for iceconnectionstatechange
+  peerConnection.addEventListener("iceconnectionstatechange", () => {
+    // ICE fail check
+    if (peerConnection.iceConnectionState === "failed") {
+      peerConnection.restartIce();
+    }
+    // ICE agent closed check
+    if (peerConnection.iceConnectionState === "closed") {
       closeCall();
     }
   });
