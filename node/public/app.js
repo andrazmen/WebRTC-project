@@ -1,5 +1,5 @@
 const socket = new WebSocket("ws://localhost:8080/");
-//const socket = new WebSocket("ws://192.168.204.138:8080/"); //192.168.1.235
+//const socket = new WebSocket("ws://192.168.1.235:8080/");
 
 const localVideo = document.querySelector("#localVideo");
 const remoteVideo = document.querySelector("#remoteVideo");
@@ -22,17 +22,20 @@ let peerConnection;
 let stream;
 
 const constraints = (window.constraints = {
-  audio: { echoCancellation: true },
+  audio: false, //{ echoCancellation: true },
   video: {
     width: 640,
     height: 480,
   },
 });
+
 /*
 const iceConfiguration = {
   iceServers: [
     {
-      urls: "stun:stun.l.google.com:19302",
+      urls: process.env.URL,
+      username: process.env.USERNAME,
+      credential: process.env.PASSWORD,
     },
   ],
 };
@@ -50,6 +53,7 @@ socket.addEventListener("open", () => {
   console.log("I am connected!");
 });
 
+// WebSocket message handler
 socket.addEventListener("message", (message) => {
   const data = JSON.parse(message.data);
   if (data.type === "id") {
@@ -118,6 +122,7 @@ socket.addEventListener("message", (message) => {
   }
 });
 
+// Camera handler
 async function openCamera() {
   try {
     // Make sure localVideo element is active
@@ -443,6 +448,11 @@ async function takeTheCall() {
       endCallButton.disabled = false;
       errorElement.innerHTML = `<p></p>`;
     }
+
+    if (peerConnection.connectionState === "failed") {
+      peerConnection.restartIce();
+    }
+
     // Disconnection check
     if (peerConnection.connectionState === "disconnected") {
       closeCall();

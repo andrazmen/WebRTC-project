@@ -6,3 +6,4 @@ Backup/
 node/public/newapp.js
 node/old
 Example/
+.env
